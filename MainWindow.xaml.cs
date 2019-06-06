@@ -4,25 +4,14 @@ using System.ComponentModel;
 using System.Drawing;
 using System.IO;
 using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Data;
-using System.Windows.Documents;
-using System.Windows.Input;
-using System.Windows.Media;
 using System.Windows.Media.Imaging;
-using System.Windows.Navigation;
-using System.Windows.Shapes;
+using Ookii.Dialogs.Wpf;
 using SaintCoinach;
-using SaintCoinach.Graphics;
 using SaintCoinach.Graphics.Lgb;
-using SaintCoinach.Imaging;
 using SaintCoinach.Xiv;
-using Brush = System.Drawing.Brush;
 using Color = System.Drawing.Color;
-using File = SaintCoinach.IO.File;
 using Image = System.Drawing.Image;
 using Pen = System.Drawing.Pen;
 using Point = System.Drawing.Point;
@@ -34,7 +23,6 @@ namespace Currents
     /// </summary>
     public partial class MainWindow : Window
     {
-        private const string GameDirectory = @"C:\Program Files (x86)\SquareEnix\FINAL FANTASY XIV - A Realm Reborn\";
         private ARealmReversed realm;
 
         private List<uint> currentIds;
@@ -44,10 +32,13 @@ namespace Currents
         {
             InitializeComponent();
 
-            realm = new ARealmReversed(GameDirectory, SaintCoinach.Ex.Language.English);
-            
             try
             {
+                string path = RequestGamePath();
+                if (string.IsNullOrEmpty(path))
+                    return;
+                realm = new ARealmReversed(path, SaintCoinach.Ex.Language.English);
+
                 currentsMap = new Dictionary<TerritoryType, List<Point>>();
 
                 InitCurrentList();
@@ -58,6 +49,71 @@ namespace Currents
                 Console.WriteLine(ex.Message);
                 Console.WriteLine(ex.StackTrace);
             }
+        }
+
+        // Thanks Godbert.
+        private static string RequestGamePath()
+        {
+            string path = Properties.Settings.Default.GamePath;
+            if (!IsValidGamePath(path))
+            {
+                string programDir;
+                if (Environment.Is64BitProcess)
+                    programDir = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86);
+                else
+                    programDir = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
+
+                path = System.IO.Path.Combine(programDir, "SquareEnix", "FINAL FANTASY XIV - A Realm Reborn");
+
+                if (IsValidGamePath(path))
+                {
+                    var msgResult = System.Windows.MessageBox.Show(string.Format("Found game installation at \"{0}\". Is this correct?", path), "Confirm game installation", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.Yes);
+                    if (msgResult == MessageBoxResult.Yes)
+                    {
+                        Properties.Settings.Default.GamePath = path;
+                        Properties.Settings.Default.Save();
+
+                        return path;
+                    }
+
+                    path = null;
+                }
+            }
+
+            VistaFolderBrowserDialog dlg = null;
+
+            while (!IsValidGamePath(path))
+            {
+                var result = (dlg ?? (dlg = new VistaFolderBrowserDialog
+                {
+                    Description = "Please select the directory of your FFXIV game installation (should contain 'boot' and 'game' directories).",
+                    ShowNewFolderButton = false,
+                })).ShowDialog();
+
+                if (!result.GetValueOrDefault(false))
+                {
+                    var msgResult = System.Windows.MessageBox.Show("Cannot continue without a valid game installation, quit the program?", "That's no good", MessageBoxButton.YesNo, MessageBoxImage.Error, MessageBoxResult.No);
+                    if (msgResult == MessageBoxResult.Yes)
+                        return "";
+                }
+
+                path = dlg.SelectedPath;
+            }
+
+            Properties.Settings.Default.GamePath = path;
+            Properties.Settings.Default.Save();
+            return path;
+        }
+
+        private static bool IsValidGamePath(string path)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+                return false;
+
+            if (!Directory.Exists(path))
+                return false;
+
+            return System.IO.File.Exists(System.IO.Path.Combine(path, "game", "ffxivgame.ver"));
         }
 
         private void InitListBox()
@@ -94,7 +150,9 @@ namespace Currents
 
         private void PlaceBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
+            string titleFormat = "Currents - {0} - {1} Field Currents";
             TerritoryType selected = (TerritoryType) PlaceBox.SelectedValue;
+            Title = string.Format(titleFormat, selected.PlaceName, currentsMap[selected].Count);
             DrawPos(selected);
         }
 
